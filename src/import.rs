@@ -139,10 +139,21 @@ impl<T: Send + Sync + Clone> ImportObjectBuilder<T> {
         Args: WasmValTypeList,
         Rets: WasmValTypeList,
     {
+        let data_ptr = if let Some(data) = &mut self.host_data {
+            data.as_mut() as *mut T as *mut std::ffi::c_void
+        } else {
+            std::ptr::null_mut()
+        };
+
         let args = Args::wasm_types();
         let returns = Rets::wasm_types();
         let ty = FuncType::new(Some(args.to_vec()), Some(returns.to_vec()));
-        let inner_func = sys::Function::create_async_func(&ty.into(), Box::new(real_func), 0)?;
+        let inner_func = sys::Function::create_async_func_with_data(
+            &ty.into(),
+            Box::new(real_func),
+            data_ptr,
+            0,
+        )?;
         self.funcs.push((name.as_ref().to_owned(), inner_func));
         Ok(self)
     }

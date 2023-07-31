@@ -503,6 +503,48 @@ impl Function {
         }
     }
 
+    #[cfg(all(feature = "async", target_os = "linux"))]
+    pub fn create_async_func_with_data(
+        ty: &FuncType,
+        real_fn: BoxedAsyncFn,
+        data_ptr: *mut std::ffi::c_void,
+        cost: u64,
+    ) -> WasmEdgeResult<Self> {
+        let mut map_host_func = ASYNC_HOST_FUNCS.write();
+
+        // generate key for the coming host function
+        let mut rng = rand::thread_rng();
+        let mut key: usize = rng.gen();
+        while map_host_func.contains_key(&key) {
+            key = rng.gen();
+        }
+        map_host_func.insert(key, Arc::new(Mutex::new(real_fn)));
+        drop(map_host_func);
+
+        let ctx = unsafe {
+            ffi::WasmEdge_FunctionInstanceCreateBinding(
+                ty.inner.0,
+                Some(wrap_async_fn),
+                key as *const usize as *mut c_void,
+                data_ptr,
+                cost,
+            )
+        };
+
+        // create a footprint for the host function
+        let footprint = ctx as usize;
+        let mut footprint_to_id = HOST_FUNC_FOOTPRINTS.lock();
+        footprint_to_id.insert(footprint, key);
+
+        match ctx.is_null() {
+            true => Err(Box::new(WasmEdgeError::Func(FuncError::Create))),
+            false => Ok(Self {
+                inner: Arc::new(Mutex::new(InnerFunc(ctx))),
+                registered: false,
+            }),
+        }
+    }
+
     /// Creates a [host function](crate::Function) with the given function type and the custom function wrapper.
     ///
     /// # Arguments
